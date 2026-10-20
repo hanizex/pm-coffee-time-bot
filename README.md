@@ -1,8 +1,8 @@
 # PM Coffee Time Bot
 
-A Telegram bot for **PM Coffee Time**, an online meetup series for project and product managers (70 episodes so far). The bot runs the full attendee journey: announcement → registration → calendar invite → reminders → recording and materials → feedback, so the organiser doesn't do any of it by hand.
+A Telegram bot for **PM Coffee Time**, an online meetup series for project and product managers that I organise and host (70 episodes so far). The bot runs the full attendee journey: announcement → registration → calendar invite → reminders → recording and materials → feedback, so the organiser doesn't do any of it by hand.
 
-Built **without code** in the SendPulse visual builder, with Google Apps Script and Google Sheets behind it for invites and data. This repository documents how it is designed. The full flow logic is in [flows.md](flows.md).
+The conversation is built **without code** in the SendPulse visual builder. Behind it, a small **Google Apps Script** backend ([apps-script/Code.gs](apps-script/Code.gs)) sends Google Calendar invites and keeps registrations and feedback in Google Sheets. The full flow logic is in [flows.md](flows.md).
 
 ## The problem
 
@@ -57,12 +57,51 @@ The weakest step is clearly feedback: half of the attendees click on the materia
 | Conversation flows, tags, variables, delays, conditions | SendPulse chatbot builder (Telegram) |
 | Calendar invites, saving answers | Google Apps Script, called by webhooks |
 | Registrations and feedback storage | Google Sheets |
-| Organiser alerts | SendPulse → Telegram notifications |
+| Organiser alerts | SendPulse → Telegram notifications; Apps Script → email |
+
+## Apps Script backend
+
+[`apps-script/Code.gs`](apps-script/Code.gs) is about 200 lines. It is deployed as a web app, and SendPulse calls it by webhook:
+
+```
+POST <web app URL>?secret=<SECRET>&action=<action>&event=<meetup code, e.g. pmct-70>
+```
+
+| Action | What it does |
+|---|---|
+| `register` | Saves or updates the registration and adds the email as a guest to the matching Google Calendar event (Google sends the invite). If the email changes, it removes the old one |
+| `details` | Saves the name and the question for the speaker |
+| `cancel` | Marks the registration as cancelled and removes the guest |
+| `feedback` / `fblater` / `fbstop` | Saves the rating and comment, or the user's choice to give feedback later or not at all |
+
+**How it stays reliable:**
+- **Shared-secret check:** requests without the right secret are refused.
+- **Script lock:** parallel webhooks can't corrupt the sheet.
+- **Upserts keyed by meetup code + Telegram ID:** repeated clicks never create duplicate rows.
+- **Retries:** a failed invite is retried every minute (`retryInvites` trigger). After 3 failed attempts, the organiser gets an email with the user's contact.
+- **Late calendar events:** `resendInvites()` re-sends invites if the calendar event was created after people had already registered.
+- **Sheet as the control panel:** the sheet also gives SendPulse its delivery check (column *J = sent*). Meetups are switched on and off in the `Events` tab, with no code changes.
+
+**Sheet tabs:**
+- `Events`: name, date, time, active, code
+- `Реєстрації`: registrations and invite status
+- `Учасники`: one row per person, with all meetups attended
+- `Фідбек`: ratings and comments
+
+**Setup:**
+1. Bind the script to a sheet with the tabs above.
+2. Enable the **Calendar** advanced service.
+3. Set the `SECRET` script property.
+4. Deploy as a web app.
+5. Run `installTriggers()` once.
+
+The calendar event must have "PM Coffee Time" in its title.
 
 ## Files
 
 - [`flows.md`](flows.md): all 9 flows block by block, with texts, buttons, conditions, delays and transitions. Private links, webhook URLs and IDs are redacted.
+- [`apps-script/Code.gs`](apps-script/Code.gs): the webhook backend. Only the test email is replaced with `test@example.com`.
 
 ---
 
-Built by [Mykola Kalakutskyi](https://github.com/hanizex): Senior Delivery Manager. [LinkedIn](https://linkedin.com/in/hanizex)
+Built by [Mykola Kalakutskyi](https://github.com/hanizex): Senior Delivery Manager, organiser and host of PM Coffee Time. [LinkedIn](https://linkedin.com/in/hanizex)
